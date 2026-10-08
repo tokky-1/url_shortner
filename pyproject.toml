@@ -8,6 +8,7 @@ dependencies = [
     "pybase62>=1.0.0",
     "pydantic-settings>=2.15.0",
     "pytest>=9.1.1",
+    "sqlalchemy>=2.1.4",
 ]
 
 [tool.pytest.ini_options]
