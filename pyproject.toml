@@ -5,6 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.20.0",
+    "psycopg[binary]>=3.3.6",
     "pybase62>=1.0.0",
     "pydantic-settings>=2.15.0",
     "pytest>=9.1.1",
