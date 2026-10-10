@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     DB_NAME: str
 
     BASE_URL: str
-
+    LOG_LEVEL: str = "INFO"
     @property
     def DB_URL(self) -> str:
         user = urllib.parse.quote(self.DB_USER, safe="")

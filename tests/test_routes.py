@@ -4,6 +4,7 @@ from sqlalchemy import select
 from core.codec import decode, encode
 from core.config import get_settings
 from models.url import URL
+from main import app
 from routes.urls import router
 
 
@@ -108,8 +109,30 @@ def test_probe_paths_are_valid_base62_so_order_matters():
     assert decode("ready") > 0
 
 
+def _app_route_paths() -> list[str]:
+    """Flattened route paths in registration order.
+
+    FastAPI wraps included routers, so app.routes is not a flat list of
+    routes any more - recurse into whatever holds the real ones.
+    """
+    paths: list[str] = []
+
+    def walk(routes) -> None:
+        for route in routes:
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                walk(inner.routes)
+            elif hasattr(route, "path"):
+                paths.append(route.path)
+
+    walk(app.routes)
+    return paths
+
+
 def test_probes_are_registered_before_the_catch_all_code_route():
-    paths = [route.path for route in router.routes]
+    # /health and /ready come from health_router, /{code} from the urls
+    # router, so this has to be asserted on the app, not on one router.
+    paths = _app_route_paths()
 
     assert paths.index("/health") < paths.index("/{code}")
     assert paths.index("/ready") < paths.index("/{code}")

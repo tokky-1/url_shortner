@@ -34,6 +34,10 @@ class JsonFormatter(logging.Formatter):
         for field in ("method", "path", "status", "duration_ms"):
             if hasattr(record, field):
                 log_record[field] = getattr(record, field)
+        # Without this, an unhandled exception logs "Exception in ASGI
+        # application" and the stack is lost.
+        if record.exc_info:
+            log_record["exception"] = self.formatException(record.exc_info)
         return json.dumps(log_record)
 
 

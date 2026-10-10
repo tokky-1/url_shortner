@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 
-from core.logging import RequestLoggingMiddleware, setup_logging
+from core.config import get_settings
+from core.log_config import RequestLoggingMiddleware, setup_logging
 
 
 def create_app() -> FastAPI:
-    setup_logging()
+    setup_logging(get_settings().LOG_LEVEL)
 
     from routes.health import health_router
     from routes.urls import router

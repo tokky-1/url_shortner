@@ -15,7 +15,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY --from=builder /install /usr/local/lib/python3.12/site-packages
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
-COPY --chown=appuser:appgroup / .
+COPY --chown=appuser:appgroup . .
 
 USER appuser
 EXPOSE 8000
