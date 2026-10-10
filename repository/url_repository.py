@@ -23,5 +23,5 @@ def increment_clicks(db: Session, url_id: int) -> None:
         )
         db.commit()
     except Exception:
-            db.rollback()
-            raise
+        db.rollback()
+        raise

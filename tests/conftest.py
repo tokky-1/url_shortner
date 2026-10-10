@@ -35,3 +35,24 @@ def db(engine):
         session.close()
         outer.rollback()
         connection.close()
+
+
+@pytest.fixture
+def client(db):
+    """TestClient whose get_db dependency yields the rollback-isolated session.
+
+    Everything the endpoints write goes through the same savepoint session as
+    the other tests, so requests hit real Postgres and still leave nothing
+    behind.
+    """
+    from fastapi.testclient import TestClient
+
+    from db.connect import get_db
+    from main import app
+
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
