@@ -46,3 +46,13 @@ def test_absurdly_long_code_raises_not_found(db):
     # 30 "z" chars decodes to roughly 5.9e53, far past the bigint column.
     with pytest.raises(URLNotFoundError):
         url_service.resolve(db, "z" * 30)
+
+
+def test_non_canonical_code_with_leading_zero_raises_not_found(db):
+    # "0" + code decodes to the same ID, but only one spelling may resolve:
+    # without the canonical-form check in resolve(), this would be a second
+    # working URL for the same row.
+    code = url_service.create_short_url(db, "https://example.com/canonical")
+
+    with pytest.raises(URLNotFoundError):
+        url_service.resolve(db, "0" + code)

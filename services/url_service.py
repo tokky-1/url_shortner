@@ -24,6 +24,9 @@ def resolve(db: Session, code: str) -> str:
     if not 0 <= url_id <= _MAX_URL_ID:
         raise URLNotFoundError(code)
 
+    if encode(url_id) != code:
+        raise URLNotFoundError(code)
+
     url = get_by_id(db, url_id)
     if url is None:
         raise URLNotFoundError(code)
