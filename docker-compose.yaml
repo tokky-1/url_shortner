@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=${DB_USER:?set DB_USER - run compose with --env-file .env}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:?set DB_PASSWORD - run compose with --env-file .env}
+      - POSTGRES_DB=${DB_NAME:?set DB_NAME - run compose with --env-file .env}
+    ports: #5432:5432 publishes Postgres to your host. Fine for local work. In AWS it would be a security group rule, never a public port.
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  migrate:
+    build: .
+    image: urlshortener:local
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    env_file: [.env]
+    environment: [DB_HOST=db]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+ 
+  app:
+    image: urlshortener:local
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    depends_on:
+       db:
+         condition: service_healthy
+       migrate:
+         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+ 
+volumes:
+  postgres_data:
