@@ -10,8 +10,8 @@
 /.env.example
 
 # Python caches and local virtualenvs
-/__pycache__
-/*.py[cod]
+**/__pycache__
+**/*.py[cod]
 /.pytest_cache
 /.venv
 /*.egg-info

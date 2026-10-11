@@ -5,7 +5,7 @@ services:
       - POSTGRES_USER=${DB_USER:?set DB_USER - run compose with --env-file .env}
       - POSTGRES_PASSWORD=${DB_PASSWORD:?set DB_PASSWORD - run compose with --env-file .env}
       - POSTGRES_DB=${DB_NAME:?set DB_NAME - run compose with --env-file .env}
-    ports:
+    ports: #5432:5432 publishes Postgres to your host. Fine for local work. In AWS it would be a security group rule, never a public port.
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -26,7 +26,6 @@ services:
     restart: "no"
  
   app:
-    build: .
     image: urlshortener:local
     ports:
       - "8000:8000"
