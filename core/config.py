@@ -13,6 +13,10 @@ class Settings(BaseSettings):
 
     BASE_URL: str
     LOG_LEVEL: str = "INFO"
+
+    # In compose the host is `redis`, overridden there the same way as DB_HOST.
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     @property
     def DB_URL(self) -> str:
         user = urllib.parse.quote(self.DB_USER, safe="")

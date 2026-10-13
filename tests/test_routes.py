@@ -1,4 +1,9 @@
+import logging
+
 import pytest
+import redis as redis_lib
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 from sqlalchemy import select
 
 from core.codec import decode, encode
@@ -179,3 +184,37 @@ def test_ready_returns_503_when_database_unreachable():
 
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable", "database": "unreachable"}
+
+
+# --- cache outage ----------------------------------------------------------
+
+
+def test_redirect_still_works_with_redis_down(client, db, monkeypatch, caplog):
+    """A cache outage must degrade latency, not availability."""
+    from cache import url_cache
+
+    code = client.post(
+        "/urls", json={"url": "https://example.com/redis-down"}
+    ).json()["code"]
+
+    # A real client aimed at a port nothing listens on, so the failure is a
+    # genuine redis.ConnectionError rather than a mock raising on cue.
+    # Retry(NoBackoff(), 0) matters here: the Redis(...) constructor otherwise
+    # retries 10 times with backoff, which makes this one call take ~5s.
+    dead = redis_lib.Redis(
+        host="127.0.0.1",
+        port=1,
+        socket_connect_timeout=0.1,
+        socket_timeout=0.1,
+        retry=Retry(NoBackoff(), 0),
+    )
+    monkeypatch.setattr(url_cache, "get_redis", lambda: dead)
+
+    with caplog.at_level(logging.WARNING, logger="cache.url_cache"):
+        response = client.get(f"/{code}", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://example.com/redis-down"
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("cache unavailable" in m for m in warnings), warnings
