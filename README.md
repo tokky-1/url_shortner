@@ -122,6 +122,67 @@ cheaper lookups between lock waits.
 If the gain is small, that is the result: it would mean the cost sits in the write
 and the commit, not the read, and option B becomes the next lever.
 
+### After Redis
+
+Measured on commit `58ab288`, image `c237a07a74e5`, one worker, 50 VUs, 30s runs.
+
+**The baseline above is not a valid "before" any more.** By the time the cache
+existed, `urls` held 102,008 rows against 1,000-67,000 during the baseline,
+autovacuum had never run (`autovacuum_count = 0`) and the table was 17.1% dead
+tuples. Comparing against it measures table bloat as much as caching. For the
+record, the raw numbers are `spread` 162.9 rps and `hot` 161.4 rps as means of
+three - both *below* the 193.8 and 187.9 baselines, which is drift, not the cache.
+
+So the real comparison is a same-session control: `VACUUM (ANALYZE) urls` first,
+then a second container on the same image with `REDIS_URL` pointed at a dead port,
+so every lookup fails in about 1ms and the app runs the pure Postgres path with
+identical code (1000 cache calls cost 1.4ms total once the breaker trips). Runs
+alternate between the two arms so drift cannot favour either.
+
+| spread pair | cache off | cache on | delta |
+| ----------: | --------: | -------: | ----: |
+| 1           | 170.9     | 180.6    | +6%   |
+| 2           | 130.2     | 183.2    | +41%  |
+| 3           | 203.1     | 200.8    | -1%   |
+| **mean**    | **168.1** | **188.2** | **+12.0%** |
+
+| hot pair | cache off | cache on | delta |
+| -------: | --------: | -------: | ----: |
+| 1        | 177.5     | 206.4    | +16%  |
+| 2        | 159.3     | 109.2    | -31%  |
+| 3        | 146.4     | 220.4    | +51%  |
+| **mean** | **161.1** | **178.7** | **+10.9%** |
+
+p95 means: `spread` 448ms to 401ms, `hot` 540ms to 550ms.
+
+**Prediction versus result.** Predicted `spread` 270-300, measured 188.2.
+Predicted `hot` 190-220, measured 178.7. The `spread` prediction was wrong by a
+third, and the reasoning behind it was wrong too: it assumed the ORM `SELECT` was
+worth about 2.2ms of the 5.3ms non-framework budget. Per-request app CPU says
+otherwise:
+
+| | app CPU per redirect |
+| ----------------- | -------------------: |
+| spread, cache off | 7.32 ms |
+| spread, cache on  | 6.85 ms |
+| hot, cache off    | 7.01 ms |
+| hot, cache on     | 6.27 ms |
+
+The `SELECT` was worth **0.5-0.7ms, not 2.2ms** - roughly 4x less than assumed.
+`hot` also gained about as much as `spread` (+11% against +12%), where the
+prediction said it would gain clearly less.
+
+Caveat on all of it: individual pair deltas run from -31% to +51%, so with three
+pairs the noise is larger than the effect. Treat +11% as "small and positive",
+not as a measured constant.
+
+**What this actually settles.** Of roughly 7ms of app CPU per redirect, about
+1.17ms is framework and logging, about 0.5ms was the `SELECT` the cache removed,
+and the remaining ~5ms is the write path: the `UPDATE`, the `COMMIT`, the session
+and the connection checkout. The cache took the small half. That answers the
+option B question directly - the write is now the limit, so moving the counter
+off the request path is the next lever, not a bigger cache.
+
 ### When Redis is unavailable
 
 Every `redis.RedisError` is caught in `url_cache`, logged at WARNING, and turned
