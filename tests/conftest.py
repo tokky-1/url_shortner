@@ -18,7 +18,10 @@ def redis_cache(monkeypatch):
     from cache import url_cache
     from core.config import get_settings
 
-    # A previous test may have tripped the breaker; each test starts closed.
+    # A previous test may have tripped the breaker. 0.0 is url_cache's "healthy"
+    # sentinel, not just a past deadline, so this restores the lock-free path
+    # rather than leaving an expired window that would send the next caller
+    # through the probe branch.
     monkeypatch.setattr(url_cache, "_skip_cache_until", 0.0)
 
     base = get_settings().REDIS_URL.rpartition("/")[0]
