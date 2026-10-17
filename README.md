@@ -108,6 +108,39 @@ cache runs, commit `58ab288` (image `c237a07a74e5`). Rows in `urls` grew from
 1,000 to about 100,000 during testing; the cache comparison was run after
 `VACUUM` and against a control to cancel that drift.
 
+
+
+Deploy on ecs · MD
+## Deploy on ECS
+ 
+I deployed this service once to AWS ECS Fargate in us-east-1 to check that it runs outside my laptop, then tore everything down. This section records what I built, what broke, and what I left out.
+ 
+### What ran
+ 
+- **App:** one Fargate task with 0.5 vCPU and 1 GB of memory, running the Docker image from ECR with a single uvicorn worker.
+- **Redis:** a second container in the same task, using `redis:7-alpine` from the public ECR mirror. It is marked non-essential, so a Redis crash does not stop the app. The app reaches it at `redis://localhost:6379/0` because containers in one task share a network namespace. Each task has its own cache, so the cache is not shared between tasks.
+- **Database:** RDS Postgres 15 on a `db.t4g.micro`, single AZ, not publicly accessible.
+- **Secrets:** RDS created and manages the database password in Secrets Manager. ECS injects it into the container as `DB_PASSWORD` at startup. The task execution role can read that one secret and no others, because its policy names the secret's exact ARN instead of using `*`.
+- **Network:** the task runs in a public subnet with a public IP, with no NAT gateway and no load balancer. The task security group allows port 8000 from my own IP only. The database security group allows port 5432 only from the task security group.
+- **Migrations:** I ran Alembic as a one-off task using the same task definition, with the command overridden to `python -m alembic upgrade head`.
+- **Health check:** the container health check calls `/health`. I did not use `/ready` for it, because restarting the app cannot fix a database outage.
+### What I checked
+ 
+With the service running, `/health` returned `ok` and `/ready` returned `"database":"ok"`. A `POST /urls` created a short code, and requesting that code returned a `302` with the correct `Location` header.
+ 
+### What went wrong
+ 
+1. **CPU architecture mismatch.** My local `docker image inspect` reported arm64, so I set the task definition to ARM64. The image manifest in ECR listed an amd64 entry, and Fargate failed with `CannotPullContainerError ... does not contain descriptor matching platform 'linux/arm64 v8'`. Switching `runtimePlatform` to `X86_64` fixed it. I have not worked out why the local build and the pushed image disagreed.
+2. **`alembic` not on the PATH.** The migration task failed with `exec: "alembic": executable file not found in $PATH`. Running it as `python -m alembic` worked. The Dockerfile still needs a fix so the bare command works.
+3. **Wrong security group on RDS.** The migration failed with `psycopg.errors.ConnectionTimeout`. The ingress rule was correct, but the instance had a different security group attached, so the rule never applied. I attached the right group with `aws rds modify-db-instance` and the migration ran.
+### Limits of this deploy
+ 
+- `BASE_URL` was a placeholder, so `short_url` in `POST /urls` responses showed `https://short.example.com/...`. The codes themselves worked.
+- There was no load balancer and no HTTPS, so I tested against the task's public IP.
+- Only one task ran, so I did not test the cache behaviour across several tasks.
+- The Redis circuit breaker is per process, as described earlier in this README.
+ 
+
 ## Known gaps
 
 - **No rate limiting.** Anyone can script `POST /urls` and fill the database.
