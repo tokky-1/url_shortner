@@ -64,11 +64,11 @@ and failing readiness would pull every instance out at once.
 
 ## Load test results
 
-k6, 30 seconds per run, 4 uvicorn worker. 
+k6, 30 seconds per run, 1 uvicorn worker.
 "Spread" means 1000 different codes.
 "Hot" means every request uses the same code.
 
-**1. 4 worker tops out near 220 req/s.** That limit is reached with just 2-3
+**1. One worker tops out near 220 req/s.** That limit is reached with just 2-3
 users. After that, more users only wait in line: at 50 users each request waits
 about 50 x 4.5ms = ~250ms. The app process was at about 100% of one core while
 Postgres used only 16-28% of one core.
@@ -103,20 +103,17 @@ guessed.
 connection. `pool_pre_ping=True` adds one round trip per connection and is an
 unmeasured suspect. Profile before changing anything.
 
-Measured on tag `v1-postgres` (`a569347`, image `802705e885e3`) and, for the
-cache runs, commit `58ab288` (image `c237a07a74e5`). Rows in `urls` grew from
-1,000 to about 100,000 during testing; the cache comparison was run after
-`VACUUM` and against a control to cancel that drift.
+Measured on tag `v1-postgres` (`a569347`) and, for the cache runs, commit
+`58ab288`. Rows in `urls` grew from 1,000 to about 100,000 during testing; the
+cache comparison was run after `VACUUM` and against a control to cancel that
+drift.
 
-
-
-Deploy on ecs · MD
 ## Deploy on ECS
- 
+
 I deployed this service once to AWS ECS Fargate in us-east-1 to check that it runs outside my laptop, then tore everything down. This section records what I built, what broke, and what I left out.
- 
+
 ### What ran
- 
+
 - **App:** one Fargate task with 0.5 vCPU and 1 GB of memory, running the Docker image from ECR with a single uvicorn worker.
 - **Redis:** a second container in the same task, using `redis:7-alpine` from the public ECR mirror. It is marked non-essential, so a Redis crash does not stop the app. The app reaches it at `redis://localhost:6379/0` because containers in one task share a network namespace. Each task has its own cache, so the cache is not shared between tasks.
 - **Database:** RDS Postgres 15 on a `db.t4g.micro`, single AZ, not publicly accessible.
@@ -124,22 +121,23 @@ I deployed this service once to AWS ECS Fargate in us-east-1 to check that it ru
 - **Network:** the task runs in a public subnet with a public IP, with no NAT gateway and no load balancer. The task security group allows port 8000 from my own IP only. The database security group allows port 5432 only from the task security group.
 - **Migrations:** I ran Alembic as a one-off task using the same task definition, with the command overridden to `python -m alembic upgrade head`.
 - **Health check:** the container health check calls `/health`. I did not use `/ready` for it, because restarting the app cannot fix a database outage.
+
 ### What I checked
- 
+
 With the service running, `/health` returned `ok` and `/ready` returned `"database":"ok"`. A `POST /urls` created a short code, and requesting that code returned a `302` with the correct `Location` header.
- 
+
 ### What went wrong
- 
-1. **CPU architecture mismatch.** My local `docker image inspect` reported arm64, so I set the task definition to ARM64. The image manifest in ECR listed an amd64 entry, and Fargate failed with `CannotPullContainerError ... does not contain descriptor matching platform 'linux/arm64 v8'`. Switching `runtimePlatform` to `X86_64` fixed it. I have not worked out why the local build and the pushed image disagreed.
-2. **`alembic` not on the PATH.** The migration task failed with `exec: "alembic": executable file not found in $PATH`. Running it as `python -m alembic` worked. The Dockerfile still needs a fix so the bare command works.
+
+1. **CPU architecture mismatch.** My local `docker image inspect` reported arm64, so I set the task definition to ARM64. The image manifest in ECR listed an amd64 entry, and Fargate failed with `CannotPullContainerError ... does not contain descriptor matching platform 'linux/arm64 v8'`. Switching `runtimePlatform` to `X86_64` fixed it. A later local rebuild reported `linux/amd64`, matching ECR. I did not find out why the earlier build reported arm64.
+2. **`alembic` not on the PATH.** The migration task failed with `exec: "alembic": executable file not found in $PATH`. Running it as `python -m alembic` worked. The cause was `pip install --target` in the Dockerfile, which put the launcher scripts in a `bin/` folder inside `site-packages`, where nothing looks for them. I changed the builder stage to `--prefix /install` and copy it to `/usr/local`, so the launchers land in `/usr/local/bin`. Bare `alembic` now works in the image. I have not redeployed with that fix.
 3. **Wrong security group on RDS.** The migration failed with `psycopg.errors.ConnectionTimeout`. The ingress rule was correct, but the instance had a different security group attached, so the rule never applied. I attached the right group with `aws rds modify-db-instance` and the migration ran.
+
 ### Limits of this deploy
- 
+
 - `BASE_URL` was a placeholder, so `short_url` in `POST /urls` responses showed `https://short.example.com/...`. The codes themselves worked.
 - There was no load balancer and no HTTPS, so I tested against the task's public IP.
 - Only one task ran, so I did not test the cache behaviour across several tasks.
 - The Redis circuit breaker is per process, as described earlier in this README.
- 
 
 ## Known gaps
 
@@ -148,6 +146,7 @@ With the service running, `/health` returned `ok` and `/ready` returned `"databa
 - **Codes can be guessed.** `/1`, `/2`, `/3` reveal every link. Fine for public links; a problem for private ones.
 - **Every redirect writes to Postgres.** Moving the click counter off the
   request path (count in Redis, save to Postgres in batches) is the next idea. The cost is lost counts if Redis dies between saves.
-- **The Redis safety check is per worker.** With 4 workers there are 4 separate
-  checks, and the very first failure still hits every in-flight request once.
+- **The Redis safety check is per worker.** Each worker keeps its own check,
+  so with several workers the very first failure still hits every in-flight
+  request once.
 - **The 24 hour cache time is a guess.** Revisit it with real hit rates.

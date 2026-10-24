@@ -42,7 +42,7 @@ services:
     # throughput but changes two variables at once. Each worker gets its own
     # SQLAlchemy pool (5 + 10 overflow), so N workers can open up to N*15
     # connections against Postgres's max_connections of 100 (97 usable).
-    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
     ports:
       - "8000:8000"
     env_file:
