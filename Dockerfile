@@ -4,7 +4,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN pip install uv && \
     uv export --no-dev --format requirements-txt -o requirements.txt && \
-    pip install -r requirements.txt --target /install
+    pip install -r requirements.txt --prefix /install
 
 
 FROM python:3.12-slim
@@ -13,7 +13,7 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY --from=builder /install /usr/local/lib/python3.12/site-packages
+COPY --from=builder /install /usr/local
 RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 COPY --chown=appuser:appgroup . .
 

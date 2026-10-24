@@ -1,7 +1,36 @@
 import pytest
+import redis as redis_lib
 from sqlalchemy.orm import Session
 
 from db.connect import get_engine
+
+
+@pytest.fixture(autouse=True)
+def redis_cache(monkeypatch):
+    """Point the cache at a throwaway Redis logical DB, flushed either side.
+
+    The `db` fixture rolls Postgres back with savepoints, but Redis has no
+    transactions: without this, every id written by a rolled-back test would
+    linger in the dev cache, so the suite would not leave the stores as it
+    found them. Autouse because `resolve()` now writes to the cache on every
+    miss, so any test touching the service touches Redis.
+    """
+    from cache import url_cache
+    from core.config import get_settings
+
+    # A previous test may have tripped the breaker. 0.0 is url_cache's "healthy"
+    # sentinel, not just a past deadline, so this restores the lock-free path
+    # rather than leaving an expired window that would send the next caller
+    # through the probe branch.
+    monkeypatch.setattr(url_cache, "_skip_cache_until", 0.0)
+
+    base = get_settings().REDIS_URL.rpartition("/")[0]
+    client = redis_lib.Redis.from_url(f"{base}/15", decode_responses=True)
+    monkeypatch.setattr(url_cache, "get_redis", lambda: client)
+
+    client.flushdb()
+    yield client
+    client.flushdb()
 
 
 @pytest.fixture(scope="session")

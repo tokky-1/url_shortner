@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+trust.json
+taskdef.json
+secret-policy.json
